@@ -1,0 +1,29 @@
+# Development dependencies
+pytest==8.0.0
+pytest-cov==4.1.0
+pytest-asyncio==0.23.0
+pytest-mock==3.12.0
+pytest-timeout==2.2.0
+
+# Code quality tools
+flake8==7.0.0
+black==24.1.0
+mypy==1.8.0
+isort==5.13.0
+pylint==3.0.3
+
+# Type stubs
+types-requests==2.31.0
+types-PyYAML==6.0.12
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
+sphinx-autodoc-typehints==1.25.2
+
+# Pre-commit hooks
+pre-commit==3.6.0
+
+# Development utilities
+ipython==8.19.0
+ipdb==0.13.13

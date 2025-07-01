@@ -1,0 +1,50 @@
+# Core ML and DL libraries
+torch==2.2.0
+transformers==4.38.0
+accelerate==0.23.0
+bitsandbytes==0.41.0
+peft==0.6.0
+einops==0.7.0
+
+# Data processing
+datasets==2.15.0
+pandas==2.1.0
+numpy==1.24.3
+scikit-learn==1.3.0
+
+# Memory and storage
+chromadb==0.4.18
+qdrant-client==1.6.3
+faiss-cpu==1.7.4
+redis==5.0.1
+sqlite3-api==0.1.0
+pymongo==4.6.1
+psycopg2-binary==2.9.9
+pinecone-client==3.0.0
+supabase==2.3.0
+
+# Distributed training and checkpointing
+deepspeed==0.12.3
+wandb==0.16.0
+ray[tune]==2.9.0
+
+# Evaluation and monitoring
+mlflow==2.9.0
+tensorboard==2.15.0
+evaluate==0.4.1
+
+# API and web framework
+fastapi==0.109.0
+uvicorn[standard]==0.25.0
+ariadne==0.21.0
+graphql-core==3.2.3
+python-multipart==0.0.6
+
+# Utilities
+tqdm==4.66.1
+python-dotenv==1.0.0
+loguru==0.7.0
+pydantic==2.5.0
+safetensors==0.4.0
+schedule==1.2.0
+psutil==5.9.6

@@ -1,0 +1,166 @@
+# Docker Compose Override for Local Development
+# This file extends docker-compose.yml with development-specific settings
+# To use: docker-compose up (automatically uses this override file)
+
+version: '3.9'
+
+services:
+  # Main CleoAI service with development settings
+  cleoai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - INSTALL_DEV_DEPS=true
+    environment:
+      # Development mode
+      - LOG_LEVEL=DEBUG
+      - API_RELOAD=true
+      
+      # Use local services
+      - REDIS_HOST=redis
+      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017/cleoai_dev
+      
+      # Enable all backends for testing
+      - USE_REDIS=true
+      - USE_MONGODB=true
+      - USE_SQLITE=true
+      - USE_CHROMADB=true
+      
+      # Disable cloud services by default (configure if needed)
+      - USE_SUPABASE=false
+      - USE_PINECONE=false
+    volumes:
+      # Mount source code for hot reloading
+      - ./src:/app/src:ro
+      - ./config.py:/app/config.py:ro
+      - ./main.py:/app/main.py:ro
+      
+      # Mount data directories
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      
+      # Mount .env file if it exists
+      - ./.env:/app/.env:ro
+    ports:
+      # Expose additional debug ports
+      - "5678:5678"  # Python debugger (debugpy)
+    command: >
+      sh -c "
+        echo 'Starting CleoAI in development mode...' &&
+        python main.py api --debug --reload
+      "
+
+  # Redis with persistence and admin interface
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # MongoDB with authentication disabled for dev
+  mongo:
+    image: mongo:7
+    environment:
+      - MONGO_INITDB_DATABASE=cleoai_dev
+    volumes:
+      - mongo_data_dev:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Mongo Express for MongoDB management
+  mongo-express:
+    image: mongo-express:latest
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongo
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin
+    ports:
+      - "8082:8081"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # Local PostgreSQL (for testing Supabase alternative)
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=cleoai
+      - POSTGRES_PASSWORD=cleoai_dev
+      - POSTGRES_DB=cleoai_memory
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cleoai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin for PostgreSQL management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@cleoai.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "8083:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pgadmin_data_dev:/var/lib/pgadmin
+
+  # Development utilities container
+  dev-tools:
+    image: alpine:latest
+    command: tail -f /dev/null
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    profiles:
+      - tools
+
+volumes:
+  redis_data_dev:
+    driver: local
+  mongo_data_dev:
+    driver: local
+  postgres_data_dev:
+    driver: local
+  pgadmin_data_dev:
+    driver: local
+
+networks:
+  default:
+    name: cleoai_dev_network
+    driver: bridge

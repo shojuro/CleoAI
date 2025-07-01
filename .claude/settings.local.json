@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "Bash(mkdir:*)",
+      "Bash(cd \"/mnt/c/Users/JM505 Computers/Desktop/CleoAI\")",
+      "Bash(mkdir -p tests/unit tests/integration tests/fixtures docs .github/workflows)",
+      "Bash(chmod:*)",
+      "Bash(grep:*)",
+      "Bash(cd:*)"
+    ],
+    "deny": []
+  }
+}

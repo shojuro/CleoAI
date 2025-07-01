@@ -1,0 +1,36 @@
+"""Utility modules for CleoAI."""
+from .error_handling import (
+    CleoAIError,
+    ModelError,
+    MemoryError,
+    InferenceError,
+    TrainingError,
+    ConfigurationError,
+    ErrorSeverity,
+    retry_on_error,
+    handle_errors,
+    ErrorContext,
+    validate_input,
+    graceful_degradation,
+    ResourceManager,
+    handle_gpu_errors,
+    CircuitBreaker,
+)
+
+__all__ = [
+    "CleoAIError",
+    "ModelError",
+    "MemoryError",
+    "InferenceError",
+    "TrainingError",
+    "ConfigurationError",
+    "ErrorSeverity",
+    "retry_on_error",
+    "handle_errors",
+    "ErrorContext",
+    "validate_input",
+    "graceful_degradation",
+    "ResourceManager",
+    "handle_gpu_errors",
+    "CircuitBreaker",
+]
