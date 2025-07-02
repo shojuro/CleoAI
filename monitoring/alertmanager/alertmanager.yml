@@ -1,0 +1,109 @@
+global:
+  resolve_timeout: 5m
+  smtp_from: 'cleoai-alerts@example.com'
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_auth_username: 'alerts@example.com'
+  smtp_auth_password: 'smtp_password'
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  
+  routes:
+    # Critical alerts
+    - match:
+        severity: critical
+      receiver: 'critical'
+      continue: true
+      group_wait: 0s
+      
+    # Security alerts
+    - match_re:
+        alertname: '.*(Security|Auth|Access).*'
+      receiver: 'security'
+      continue: true
+      
+    # Performance alerts
+    - match:
+        alertname: HighResponseTime
+      receiver: 'performance'
+      group_interval: 5m
+      
+    # Business metrics
+    - match:
+        severity: info
+      receiver: 'business'
+      group_interval: 30m
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'devops@example.com'
+        headers:
+          Subject: '[CleoAI] {{ .GroupLabels.alertname }} - {{ .GroupLabels.severity }}'
+        html: '{{ template "email.default.html" . }}'
+    slack_configs:
+      - channel: '#cleoai-alerts'
+        title: 'CleoAI Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+
+  - name: 'critical'
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_SERVICE_KEY}'
+        description: '{{ .GroupLabels.alertname }}: {{ .GroupLabels.instance }}'
+    email_configs:
+      - to: 'oncall@example.com'
+        headers:
+          Subject: '[CRITICAL] CleoAI: {{ .GroupLabels.alertname }}'
+    slack_configs:
+      - channel: '#cleoai-critical'
+        color: 'danger'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+
+  - name: 'security'
+    email_configs:
+      - to: 'security@example.com'
+        headers:
+          Subject: '[SECURITY] CleoAI: {{ .GroupLabels.alertname }}'
+    slack_configs:
+      - channel: '#cleoai-security'
+        color: 'warning'
+        title: 'Security Alert: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+
+  - name: 'performance'
+    slack_configs:
+      - channel: '#cleoai-performance'
+        color: 'warning'
+        title: 'Performance Alert: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+
+  - name: 'business'
+    slack_configs:
+      - channel: '#cleoai-business'
+        color: 'good'
+        title: 'Business Metric: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+
+inhibit_rules:
+  # Inhibit less severe alerts if critical alert is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']
+    
+  # Inhibit node alerts if the entire service is down
+  - source_match:
+      alertname: 'APIDown'
+    target_match_re:
+      alertname: '.*(CPU|Memory|Disk).*'
+    equal: ['cluster']

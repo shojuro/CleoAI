@@ -1,0 +1,173 @@
+groups:
+  - name: cleoai_alerts
+    interval: 30s
+    rules:
+      # API Availability
+      - alert: APIDown
+        expr: up{job="cleoai"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cleoai
+        annotations:
+          summary: "CleoAI API is down"
+          description: "CleoAI API has been down for more than 5 minutes."
+
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(cleoai_api_requests_total{status_code=~"5.."}[5m])) /
+            sum(rate(cleoai_api_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate is above 5% (current: {{ $value | humanizePercentage }})"
+
+      # High Response Time
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(cleoai_api_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile response time for {{ $labels.endpoint }} is above 2s (current: {{ $value }}s)"
+
+      # Model Inference Slow
+      - alert: SlowModelInference
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(cleoai_model_inference_duration_seconds_bucket[5m])) by (le, model_name)
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "Slow model inference"
+          description: "Model {{ $labels.model_name }} 95th percentile inference time is above 30s (current: {{ $value }}s)"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            cleoai_system_memory_usage_bytes{memory_type="used"} /
+            cleoai_system_memory_usage_bytes{memory_type="total"}
+          ) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 90% (current: {{ $value | humanizePercentage }})"
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: cleoai_system_cpu_usage_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 90% (current: {{ $value }}%)"
+
+      # Disk Space Low
+      - alert: LowDiskSpace
+        expr: |
+          (
+            cleoai_system_disk_usage_bytes{usage_type="free"} /
+            cleoai_system_disk_usage_bytes{usage_type="total"}
+          ) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: cleoai
+        annotations:
+          summary: "Low disk space"
+          description: "Free disk space on {{ $labels.mount_point }} is below 10% (current: {{ $value | humanizePercentage }})"
+
+      # Memory Backend Down
+      - alert: MemoryBackendDown
+        expr: up{job=~"redis|mongodb|postgresql"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cleoai
+        annotations:
+          summary: "Memory backend {{ $labels.job }} is down"
+          description: "Memory backend {{ $labels.job }} has been down for more than 5 minutes."
+
+      # High Memory Operation Errors
+      - alert: HighMemoryOperationErrors
+        expr: |
+          (
+            sum(rate(cleoai_memory_operations_total{status="error"}[5m])) by (backend) /
+            sum(rate(cleoai_memory_operations_total[5m])) by (backend)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High memory operation error rate"
+          description: "Memory backend {{ $labels.backend }} error rate is above 10% (current: {{ $value | humanizePercentage }})"
+
+      # Model Queue Backed Up
+      - alert: ModelQueueBackedUp
+        expr: cleoai_model_queue_size > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "Model inference queue backed up"
+          description: "Model {{ $labels.model_name }} has {{ $value }} requests in queue"
+
+      # No Active Users (Business Metric)
+      - alert: NoActiveUsers
+        expr: cleoai_users_active{time_window="5m"} == 0
+        for: 30m
+        labels:
+          severity: info
+          service: cleoai
+        annotations:
+          summary: "No active users"
+          description: "No active users in the last 30 minutes"
+
+      # Authentication Failures
+      - alert: HighAuthFailures
+        expr: |
+          sum(rate(cleoai_errors_total{error_type="authentication"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High authentication failure rate"
+          description: "More than 10 authentication failures per second (current: {{ $value }})"
+
+      # GPU Memory High (if GPU available)
+      - alert: HighGPUMemoryUsage
+        expr: |
+          (
+            cleoai_gpu_memory_usage_bytes{memory_type="used"} /
+            cleoai_gpu_memory_usage_bytes{memory_type="total"}
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: cleoai
+        annotations:
+          summary: "High GPU memory usage"
+          description: "GPU {{ $labels.gpu_id }} memory usage is above 90% (current: {{ $value | humanizePercentage }})"

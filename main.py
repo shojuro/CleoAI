@@ -322,16 +322,30 @@ from src.inference.inference_engine import (
     create_interactive_session
 )
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, project_config.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(project_config.log_file),
-        logging.StreamHandler()
-    ]
+# Import monitoring modules
+from src.monitoring import (
+    setup_logging,
+    initialize_tracing,
+    initialize_error_tracking,
+    instrument_app,
+    MetricsConfig,
+    TracingConfig,
+    LogConfig,
+    ErrorTrackingConfig
 )
+
+# Configure logging with enhanced monitoring
+log_config = LogConfig()
+setup_logging(log_config)
 logger = logging.getLogger(__name__)
+
+# Initialize tracing
+tracing_config = TracingConfig()
+tracer = initialize_tracing(tracing_config)
+
+# Initialize error tracking
+error_config = ErrorTrackingConfig()
+initialize_error_tracking(error_config)
 
 def parse_args():
     """Parse command line arguments."""
@@ -687,6 +701,13 @@ def run_api_server(args):
         cors_origins=api_config.cors_origins,
         debug=args.debug
     )
+    
+    # Apply monitoring configuration
+    metrics_config = MetricsConfig()
+    metrics_config.apply_to_app(app)
+    
+    # Instrument app for tracing
+    instrument_app(app, tracing_config)
     
     # Run with uvicorn
     import uvicorn

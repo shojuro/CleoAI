@@ -1,0 +1,38 @@
+[Unit]
+Description=CleoAI Database Backup Scheduler
+Documentation=https://github.com/yourusername/cleoai
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=cleoai
+Group=cleoai
+WorkingDirectory=/opt/cleoai
+
+# Environment
+EnvironmentFile=/opt/cleoai/.env
+Environment="PYTHONPATH=/opt/cleoai"
+
+# Process management
+ExecStart=/opt/cleoai/venv/bin/python /opt/cleoai/scripts/backup_scheduler.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cleoai/backups /var/log/cleoai
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=512M
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target

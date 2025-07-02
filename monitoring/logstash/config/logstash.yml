@@ -1,0 +1,10 @@
+http.host: "0.0.0.0"
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+pipeline.workers: 4
+pipeline.batch.size: 125
+pipeline.batch.delay: 50
+config.reload.automatic: true
+config.reload.interval: 3s
+queue.type: persisted
+queue.max_bytes: 1gb

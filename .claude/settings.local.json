@@ -18,7 +18,9 @@
       "Bash(sudo apt install:*)",
       "Bash(source:*)",
       "Bash(cd:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(pip install:*)",
+      "Bash(. venv_wsl/bin/activate)"
     ],
     "deny": []
   }
