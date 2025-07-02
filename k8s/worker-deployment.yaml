@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cleoai-worker
+  namespace: cleoai
+  labels:
+    app: cleoai-worker
+    component: worker
+    version: v1
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cleoai-worker
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: cleoai-worker
+        component: worker
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cleoai-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: worker
+        image: cleoai/worker:latest
+        imagePullPolicy: Always
+        command: ["python", "-m", "src.worker"]
+        env:
+        - name: WORKER_TYPE
+          value: "inference"
+        - name: WORKER_CONCURRENCY
+          value: "4"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: postgres-url
+        - name: MONGODB_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: mongodb-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: redis-url
+        - name: MODEL_CACHE_DIR
+          value: "/models"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://opentelemetry-collector:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "cleoai-worker"
+        resources:
+          requests:
+            cpu: "2000m"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; from src.worker.health import check_health; sys.exit(0 if check_health() else 1)"
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; from src.worker.health import check_ready; sys.exit(0 if check_ready() else 1)"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        - name: cache
+          mountPath: /cache
+        - name: dshm
+          mountPath: /dev/shm
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: cleoai-models-pvc
+      - name: cache
+        emptyDir:
+          sizeLimit: 10Gi
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+      nodeSelector:
+        node.kubernetes.io/gpu: "true"
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values:
+                - g4dn.xlarge
+                - g4dn.2xlarge
+                - p3.2xlarge
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - cleoai-worker
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cleoai-worker
+  namespace: cleoai
+  labels:
+    app: cleoai-worker
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cleoai-models-pvc
+  namespace: cleoai
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 100Gi

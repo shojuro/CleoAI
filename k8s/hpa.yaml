@@ -1,0 +1,161 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cleoai-api-hpa
+  namespace: cleoai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cleoai-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  - type: External
+    external:
+      metric:
+        name: queue_depth
+        selector:
+          matchLabels:
+            queue: inference
+      target:
+        type: Value
+        value: "100"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 5
+        periodSeconds: 30
+      selectPolicy: Max
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cleoai-worker-hpa
+  namespace: cleoai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cleoai-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  - type: External
+    external:
+      metric:
+        name: inference_queue_length
+        selector:
+          matchLabels:
+            queue: inference
+      target:
+        type: AverageValue
+        averageValue: "50"
+  - type: External
+    external:
+      metric:
+        name: gpu_utilization
+        selector:
+          matchLabels:
+            gpu: nvidia
+      target:
+        type: Utilization
+        averageUtilization: 90
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: cleoai
+data:
+  config.yaml: |
+    rules:
+    - seriesQuery: 'http_requests_total{namespace="cleoai"}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^http_requests_total"
+        as: "http_requests_per_second"
+      metricsQuery: 'rate(http_requests_total{<<.LabelMatchers>>}[1m])'
+    
+    - seriesQuery: 'inference_queue_depth{namespace="cleoai"}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+      name:
+        matches: "^inference_queue_depth"
+        as: "queue_depth"
+      metricsQuery: 'avg(inference_queue_depth{<<.LabelMatchers>>})'
+    
+    - seriesQuery: 'gpu_utilization_percent{namespace="cleoai"}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^gpu_utilization_percent"
+        as: "gpu_utilization"
+      metricsQuery: 'avg(gpu_utilization_percent{<<.LabelMatchers>>})'

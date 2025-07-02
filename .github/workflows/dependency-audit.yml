@@ -1,0 +1,422 @@
+name: Dependency Security Audit
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'yarn.lock'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'yarn.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  python-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety pip-audit bandit semgrep
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+    
+    - name: Run Safety check
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check --short-report || true
+    
+    - name: Run pip-audit
+      run: |
+        pip-audit --format=json --output=pip-audit-report.json || true
+        pip-audit --format=cyclonedx-json --output=pip-audit-sbom.json || true
+    
+    - name: Run custom dependency audit
+      run: |
+        python scripts/audit_dependencies.py --format json --output custom-audit-report.json
+    
+    - name: Run Bandit security scan
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ -ll || true
+    
+    - name: Run Semgrep security scan
+      env:
+        SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      run: |
+        semgrep --config=auto --json --output=semgrep-report.json src/ || true
+        semgrep --config=auto src/ || true
+    
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: python-security-reports
+        path: |
+          safety-report.json
+          pip-audit-report.json
+          pip-audit-sbom.json
+          custom-audit-report.json
+          bandit-report.json
+          semgrep-report.json
+        retention-days: 30
+    
+    - name: Upload SARIF to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always() && github.event_name != 'pull_request'
+      with:
+        sarif_file: semgrep-report.json
+      continue-on-error: true
+    
+    - name: Check for critical vulnerabilities
+      run: |
+        python -c "
+        import json
+        import sys
+        
+        # Check custom audit report
+        try:
+            with open('custom-audit-report.json', 'r') as f:
+                report = json.load(f)
+            
+            critical = report.get('critical_vulnerabilities', 0)
+            high = report.get('high_vulnerabilities', 0)
+            
+            print(f'Critical vulnerabilities: {critical}')
+            print(f'High vulnerabilities: {high}')
+            
+            if critical > 0:
+                print('::error::Critical security vulnerabilities found!')
+                sys.exit(1)
+            elif high > 5:
+                print('::warning::Many high-severity vulnerabilities found')
+                sys.exit(1)
+        except Exception as e:
+            print(f'Error reading audit report: {e}')
+            sys.exit(1)
+        "
+
+  nodejs-audit:
+    name: Node.js Dependency Audit
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.modified, 'package.json') || contains(github.event.head_commit.added, 'package.json')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+      continue-on-error: true
+    
+    - name: Run npm audit
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit-report.json || true
+        npm audit --audit-level=moderate || true
+    
+    - name: Run npm outdated
+      run: |
+        npm outdated --json > npm-outdated-report.json || true
+        npm outdated || true
+    
+    - name: Upload Node.js Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: nodejs-security-reports
+        path: |
+          npm-audit-report.json
+          npm-outdated-report.json
+        retention-days: 30
+    
+    - name: Check npm audit results
+      run: |
+        if [ -f npm-audit-report.json ]; then
+          CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' npm-audit-report.json)
+          HIGH=$(jq '.metadata.vulnerabilities.high // 0' npm-audit-report.json)
+          
+          echo "Critical vulnerabilities: $CRITICAL"
+          echo "High vulnerabilities: $HIGH"
+          
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::Critical npm vulnerabilities found!"
+            exit 1
+          elif [ "$HIGH" -gt 5 ]; then
+            echo "::warning::Many high-severity npm vulnerabilities found"
+          fi
+        fi
+
+  docker-audit:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: |
+        docker build -t cleoai:audit .
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'cleoai:audit'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always() && github.event_name != 'pull_request'
+      with:
+        sarif_file: 'trivy-results.sarif'
+    
+    - name: Run Trivy for JSON report
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'cleoai:audit'
+        format: 'json'
+        output: 'trivy-results.json'
+    
+    - name: Upload Trivy reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: docker-security-reports
+        path: |
+          trivy-results.sarif
+          trivy-results.json
+        retention-days: 30
+
+  create-issue:
+    name: Create Security Issue
+    runs-on: ubuntu-latest
+    needs: [python-audit, nodejs-audit, docker-audit]
+    if: always() && (needs.python-audit.result == 'failure' || needs.nodejs-audit.result == 'failure')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+    
+    - name: Create security issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          let issueBody = `# 🚨 Security Vulnerabilities Detected
+          
+          This issue was automatically created by the dependency audit workflow.
+          
+          **Run Details:**
+          - Workflow: ${{ github.workflow }}
+          - Run ID: ${{ github.run_id }}
+          - Commit: ${{ github.sha }}
+          - Branch: ${{ github.ref_name }}
+          
+          ## Summary
+          
+          `;
+          
+          // Read custom audit report if available
+          try {
+            const auditPath = path.join('python-security-reports', 'custom-audit-report.json');
+            if (fs.existsSync(auditPath)) {
+              const auditData = JSON.parse(fs.readFileSync(auditPath, 'utf8'));
+              
+              issueBody += `### Python Dependencies
+          - **Total packages:** ${auditData.total_packages}
+          - **Vulnerable packages:** ${auditData.vulnerable_packages}
+          - **Critical vulnerabilities:** ${auditData.critical_vulnerabilities}
+          - **High vulnerabilities:** ${auditData.high_vulnerabilities}
+          - **Medium vulnerabilities:** ${auditData.medium_vulnerabilities}
+          
+          `;
+              
+              if (auditData.recommendations && auditData.recommendations.length > 0) {
+                issueBody += `### Recommendations
+          
+          `;
+                auditData.recommendations.forEach((rec, index) => {
+                  issueBody += `${index + 1}. ${rec}\n`;
+                });
+                issueBody += '\n';
+              }
+            }
+          } catch (error) {
+            console.log('Could not read audit report:', error.message);
+          }
+          
+          issueBody += `
+          ## Actions Required
+          
+          1. Review the security reports in the workflow artifacts
+          2. Update vulnerable dependencies using: \`python scripts/update_dependencies.py --security-only\`
+          3. Test the application after updates
+          4. Close this issue once all critical and high-severity vulnerabilities are resolved
+          
+          ## Artifacts
+          
+          Security reports are available in the workflow run artifacts:
+          - [Python Security Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - [Docker Security Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ---
+          *This issue will be automatically updated when new vulnerabilities are detected.*
+          `;
+          
+          // Check if there's already an open security issue
+          const issues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open',
+            labels: 'security,dependencies'
+          });
+          
+          const existingIssue = issues.data.find(issue => 
+            issue.title.includes('Security Vulnerabilities Detected')
+          );
+          
+          if (existingIssue) {
+            // Update existing issue
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existingIssue.number,
+              body: `## Update - ${new Date().toISOString()}
+          
+          New security vulnerabilities detected. See the latest workflow run for details:
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          `
+            });
+          } else {
+            // Create new issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Security Vulnerabilities Detected in Dependencies',
+              body: issueBody,
+              labels: ['security', 'dependencies', 'high-priority']
+            });
+          }
+
+  auto-update:
+    name: Auto-update Dependencies
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+    
+    - name: Update security vulnerabilities
+      run: |
+        python scripts/update_dependencies.py --security-only --output update-report.json
+    
+    - name: Check if updates were applied
+      id: check_updates
+      run: |
+        if [ -f update-report.json ]; then
+          UPDATES=$(jq '.updates | length' update-report.json)
+          echo "updates_count=$UPDATES" >> $GITHUB_OUTPUT
+          
+          if [ "$UPDATES" -gt 0 ]; then
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "has_updates=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Pull Request
+      if: steps.check_updates.outputs.has_updates == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "🔒 Auto-update dependencies with security fixes"
+        title: "🔒 Automated Security Dependency Updates"
+        body: |
+          This PR contains automated security updates for dependencies.
+          
+          ## Updates Applied
+          
+          This PR was automatically created by the dependency audit workflow to fix security vulnerabilities.
+          
+          **Please review the changes and test thoroughly before merging.**
+          
+          ## Verification
+          
+          - [ ] All tests pass
+          - [ ] Application starts correctly
+          - [ ] Core functionality works as expected
+          - [ ] No breaking changes introduced
+          
+          ## Security Report
+          
+          See the workflow run for detailed security scan results.
+        branch: automated-security-updates
+        delete-branch: true
+        labels: |
+          security
+          dependencies
+          automated

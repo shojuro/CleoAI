@@ -1,0 +1,99 @@
+database:
+  postgres:
+    # Connection settings
+    host: ${POSTGRES_HOST:localhost}
+    port: ${POSTGRES_PORT:5432}
+    database: ${POSTGRES_DB:cleoai}
+    user: ${POSTGRES_USER:cleoai_user}
+    password: ${POSTGRES_PASSWORD}
+    
+    # Pool settings
+    pool_min_size: 2
+    pool_max_size: 20
+    pool_timeout: 30.0
+    pool_recycle: 3600  # Recycle connections after 1 hour
+    pool_pre_ping: true  # Test connections before use
+    
+    # Performance settings
+    statement_cache_size: 20
+    max_cached_statement_lifetime: 300
+    max_inactive_connection_lifetime: 300
+    
+  mongodb:
+    # Connection settings
+    host: ${MONGODB_HOST:localhost}
+    port: ${MONGODB_PORT:27017}
+    database: ${MONGODB_DB:cleoai}
+    user: ${MONGODB_USER:cleoai_user}
+    password: ${MONGODB_PASSWORD}
+    replica_set: ${MONGODB_REPLICA_SET}
+    
+    # Pool settings
+    pool_min_size: 2
+    pool_max_size: 100
+    pool_timeout: 30.0
+    max_idle_time_ms: 120000  # 2 minutes
+    
+    # Connection options
+    server_selection_timeout_ms: 5000
+    connect_timeout_ms: 10000
+    socket_timeout_ms: 60000
+    heartbeat_frequency_ms: 10000
+    
+  redis:
+    # Connection settings
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD}
+    db: ${REDIS_DB:0}
+    
+    # Sentinel settings (optional)
+    sentinels:
+      - host: ${REDIS_SENTINEL_1_HOST}
+        port: ${REDIS_SENTINEL_1_PORT:26379}
+      - host: ${REDIS_SENTINEL_2_HOST}
+        port: ${REDIS_SENTINEL_2_PORT:26379}
+      - host: ${REDIS_SENTINEL_3_HOST}
+        port: ${REDIS_SENTINEL_3_PORT:26379}
+    master_name: ${REDIS_MASTER_NAME:mymaster}
+    
+    # Pool settings
+    pool_min_size: 2
+    pool_max_size: 50
+    pool_timeout: 30.0
+    socket_keepalive: true
+    socket_keepalive_options:
+      TCP_KEEPIDLE: 120
+      TCP_KEEPINTVL: 30
+      TCP_KEEPCNT: 3
+    
+    # Performance settings
+    decode_responses: true
+    health_check_interval: 30
+
+# Connection pool monitoring
+monitoring:
+  enabled: true
+  metrics_interval: 60
+  slow_query_threshold: 1.0  # seconds
+  
+  alerts:
+    pool_exhausted:
+      enabled: true
+      threshold: 0.9  # 90% pool utilization
+    connection_errors:
+      enabled: true
+      threshold: 10  # errors per minute
+    slow_queries:
+      enabled: true
+      threshold: 5  # queries per minute
+
+# Circuit breaker settings
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  recovery_timeout: 60
+  expected_exception_types:
+    - ConnectionError
+    - TimeoutError
+    - OperationalError

@@ -1,0 +1,222 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cleoai-api
+  namespace: cleoai
+  labels:
+    app: cleoai-api
+    component: api
+    version: v1
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cleoai-api
+      component: api
+  template:
+    metadata:
+      labels:
+        app: cleoai-api
+        component: api
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cleoai-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: api
+        image: cleoai/api:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: postgres-url
+        - name: MONGODB_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: mongodb-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-database
+              key: redis-url
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-auth
+              key: jwt-secret
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cleoai-encryption
+              key: master-key
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://opentelemetry-collector:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "cleoai-api"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: cache
+          mountPath: /app/cache
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: cleoai-api-config
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - cleoai-api
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: cleoai-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cleoai-api
+  namespace: cleoai
+  labels:
+    app: cleoai-api
+    component: api
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: cleoai-api
+    component: api
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cleoai-api
+  namespace: cleoai
+  labels:
+    app: cleoai-api
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cleoai-api-config
+  namespace: cleoai
+data:
+  app.yaml: |
+    server:
+      host: 0.0.0.0
+      port: 8000
+      workers: 4
+      timeout: 60
+    
+    cors:
+      origins:
+        - http://localhost:3000
+        - https://cleoai.com
+      allow_credentials: true
+      max_age: 3600
+    
+    rate_limit:
+      enabled: true
+      default_limit: 100
+      window_minutes: 1
+    
+    security:
+      hsts_enabled: true
+      csp_enabled: true
+      frame_options: DENY
+    
+    cache:
+      type: redis
+      ttl: 3600
+      max_entries: 10000
