@@ -12,6 +12,12 @@ from typing import Dict, List, Optional, Union, Literal
 from dataclasses import dataclass
 import torch
 
+# Import secrets manager
+from src.utils.secrets_manager import get_secrets_manager, init_secrets_manager
+
+# Initialize secrets manager
+secrets_manager = init_secrets_manager()
+
 # Configure logging
 logger: logging.Logger = logging.getLogger(__name__)
 

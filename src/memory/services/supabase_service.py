@@ -415,10 +415,12 @@ class SupabaseMemoryService:
             ).gte("importance", min_importance)
             
             if text_query:
-                # Use PostgreSQL full-text search
+                # Use PostgreSQL full-text search with proper escaping
+                # Escape special characters to prevent SQL injection
+                escaped_query = text_query.replace("%", "\\%").replace("_", "\\_")
                 query = query.or_(
-                    f"title.ilike.%{text_query}%,"
-                    f"content.ilike.%{text_query}%"
+                    f"title.ilike.%{escaped_query}%,"
+                    f"content.ilike.%{escaped_query}%"
                 )
             
             if emotion:

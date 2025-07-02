@@ -33,6 +33,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from src.model.moe_model import MoEModel
 from src.memory.memory_manager import MemoryManager, Conversation
+from src.utils.validators import (
+    ConversationInput, sanitize_string, detect_sql_injection, 
+    detect_xss, validator, ValidationError
+)
 
 # Configure logging
 logging.basicConfig(
@@ -273,6 +277,43 @@ class InferenceEngine:
         """
         # Start timing
         start_time = time.time()
+        
+        # Validate and sanitize inputs
+        try:
+            # Validate message
+            if not user_message or len(user_message.strip()) == 0:
+                raise ValidationError("Message cannot be empty")
+            
+            # Check for injection attempts
+            if detect_sql_injection(user_message) or detect_xss(user_message):
+                logger.warning(f"Potential injection detected from user {user_id}")
+                raise ValidationError("Invalid input detected")
+            
+            # Sanitize message
+            user_message = sanitize_string(user_message, max_length=10000)
+            
+            # Validate user_id
+            if user_id:
+                user_id = sanitize_string(user_id, max_length=128)
+            
+            # Validate conversation_id
+            if conversation_id:
+                conversation_id = sanitize_string(conversation_id, max_length=128)
+                
+            # Validate system prompt
+            if system_prompt:
+                if detect_sql_injection(system_prompt) or detect_xss(system_prompt):
+                    raise ValidationError("Invalid system prompt")
+                system_prompt = sanitize_string(system_prompt, max_length=2000)
+                
+        except ValidationError as e:
+            logger.error(f"Input validation failed: {e}")
+            return {
+                "response": "I'm sorry, but I cannot process that input. Please try rephrasing your message.",
+                "conversation_id": conversation_id or "error",
+                "error": "Invalid input",
+                "processing_time": time.time() - start_time
+            }
         
         # Set defaults if not provided
         if not conversation_id:

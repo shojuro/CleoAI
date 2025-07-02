@@ -8,7 +8,17 @@
       "Bash(mkdir -p tests/unit tests/integration tests/fixtures docs .github/workflows)",
       "Bash(chmod:*)",
       "Bash(grep:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(sudo apt:*)",
+      "Bash(sudo apt install:*)",
+      "Bash(source:*)",
+      "Bash(cd:*)",
+      "Bash(git rm:*)"
     ],
     "deny": []
   }
